@@ -1,0 +1,12 @@
+# Environnement virtuel
+.venv/
+venv/
+
+# Fichiers Python temporaires
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Fichiers de logs ou temporaires
+*.log
