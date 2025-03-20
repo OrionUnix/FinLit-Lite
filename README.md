@@ -30,4 +30,4 @@ FinLite/
 └───widgets/
     │   indices.py      # Market indices widget
     │   trending.py     # Trending stocks widget
-    │   chart.py        # Price chart utilities
+    │   chart.py        # Price chart utilities"# FinLit-Lite" 
