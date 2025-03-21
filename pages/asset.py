@@ -4,11 +4,12 @@ import plotly.graph_objects as go
 import pandas as pd
 import numpy as np
 from datetime import datetime
+from widgets.technical_charts import create_price_chart, create_gauge
 
 # Configuration de la page
 st.set_page_config(page_title="Asset Details", layout="wide")
 
-# Couleurs par défaut de Streamlit
+# Couleurs par défaut
 positive_color = "#34C759"  # Vert
 negative_color = "#FF4B4B"  # Rouge
 
@@ -31,26 +32,14 @@ def get_asset_data(symbol):
         st.error(f"Error retrieving data: {str(e)}")
         st.stop()
 
-def create_price_chart(df, chart_type="Candlestick"):
-    """Create a price chart (Line or Candlestick)."""
-    fig = go.Figure()
-    if chart_type == "Candlestick":
-        fig.add_trace(go.Candlestick(x=df.index, open=df["Open"], high=df["High"], low=df["Low"], close=df["Close"],
-                                     name="Price", increasing_line_color=positive_color, decreasing_line_color=negative_color))
-    else:
-        fig.add_trace(go.Scatter(x=df.index, y=df["Close"], mode="lines", line=dict(color=positive_color), name="Price"))
-    fig.update_layout(title="Price History (1 Year)", yaxis_title="Price ($)", xaxis_title="Date", template="plotly_white",
-                      margin=dict(t=40, b=20), height=400)
-    return fig
-
 def calculate_technical(df):
     """Calculate technical indicators manually without pandas_ta."""
     df = df.copy()
     
     # RSI
     delta = df['Close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+    gain = delta.where(delta > 0, 0).rolling(window=14).mean()
+    loss = -delta.where(delta < 0, 0).rolling(window=14).mean()
     rs = gain / loss
     df['RSI'] = 100 - (100 / (1 + rs))
     
@@ -83,7 +72,7 @@ def calculate_technical(df):
     tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
     df['ATR'] = tr.rolling(window=14).mean()
     
-    # Chaikin Oscillator (simplifié, sans AD directe)
+    # Chaikin Oscillator (simplifié)
     ad = ((2 * df['Close'] - df['High'] - df['Low']) / (df['High'] - df['Low']) * df['Volume']).cumsum()
     df['CHAIKIN'] = ad.ewm(span=3, adjust=False).mean() - ad.ewm(span=10, adjust=False).mean()
     
@@ -95,6 +84,24 @@ def calculate_technical(df):
     avg28 = (bp.rolling(window=28).sum() / tr.rolling(window=28).sum())
     df['UO'] = 100 * (4 * avg7 + 2 * avg14 + avg28) / 7
     
+    # Bollinger Bands (bonus)
+    df['MA20'] = df['Close'].rolling(window=20).mean()
+    std = df['Close'].rolling(window=20).std()
+    df['BB_Upper'] = df['MA20'] + (std * 2)
+    df['BB_Lower'] = df['MA20'] - (std * 2)
+    
+    # OBV (bonus)
+    df['OBV'] = np.where(df['Close'] > df['Close'].shift(1), df['Volume'], 
+                        np.where(df['Close'] < df['Close'].shift(1), -df['Volume'], 0)).cumsum()
+    
+    # Ichimoku Cloud (bonus)
+    high_9, low_9 = df['High'].rolling(9).max(), df['Low'].rolling(9).min()
+    df['Tenkan'] = (high_9 + low_9) / 2
+    high_26, low_26 = df['High'].rolling(26).max(), df['Low'].rolling(26).min()
+    df['Kijun'] = (high_26 + low_26) / 2
+    df['SenkouA'] = ((df['Tenkan'] + df['Kijun']) / 2).shift(26)
+    df['SenkouB'] = ((df['High'].rolling(52).max() + df['Low'].rolling(52).min()) / 2).shift(26)
+    
     return df
 
 # Sidebar
@@ -103,14 +110,20 @@ with st.sidebar:
     ### Welcome to FinLite (Lite Version)  
     This is a free, open-source demo built in Python, showcasing basic portfolio analysis with real-time data (~5-min delay). Explore a sample portfolio, track asset values, and visualize gains/losses. Designed for simplicity and hosted on Streamlit Community Cloud, this is just a taste of FinLite’s potential!
     """)
-    st.markdown(f"- 🏠 [Home](/)", unsafe_allow_html=True)
-    st.markdown(f"- 📊 [Asset](/asset?symbol={st.query_params.get('symbol', 'AAPL')})", unsafe_allow_html=True)
+    symbol = st.query_params.get("symbol", "NVDA")
+    st.markdown(f"- 🏠 [Home](/)\n- 📊 [Asset](/asset?symbol={symbol})", unsafe_allow_html=True)
+    with st.expander("📈 Paramètres des indicateurs", expanded=False):
+        bollinger_enabled = st.checkbox("Bollinger Bands", True)
+        ichimoku_enabled = st.checkbox("Ichimoku Cloud", False)
+        obv_enabled = st.checkbox("OBV", False)
+        selected_indicators = [i for i, enabled in [("Bollinger Bands", bollinger_enabled), 
+                                                   ("Ichimoku Cloud", ichimoku_enabled), 
+                                                   ("OBV", obv_enabled)] if enabled]
 
 # Récupération des données
-symbol = st.query_params.get("symbol", "NVDA")
 asset_data = get_asset_data(symbol)
 info = asset_data["info"]
-history = asset_data["history"]
+history = calculate_technical(asset_data["history"])
 
 # En-tête principal
 st.subheader(f"{info.get('longName', symbol)} ({symbol})")
@@ -143,7 +156,7 @@ with col1:
         background_color = positive_color if change_pct >= 0 else negative_color
         st.markdown(
             f"""
-            <div class='asset-card' style='border-radius: 10px; border: 1px solid #ccc; background: transparent; padding: 0;'>
+            <div style='border-radius: 10px; border: 1px solid #ccc; padding: 0;'>
                 <div style='background-color: {background_color}; color: white; padding: 0.5rem; text-align: center; font-weight: 600; font-size: 1.1rem; border-radius: 10px 10px 0 0;'>
                     {symbol}
                 </div>
@@ -171,18 +184,18 @@ with col1:
         st.subheader("Key Metrics")
         st.markdown(
             f"""
-            <div style='padding: 0.5rem; border: 1px solid #ccc; border-radius: 5px; background: transparent;'>
-                <div style='font-size: 0.9rem;'>Previous Close: {info.get('regularMarketPreviousClose', 'N/A')}$</div>
-                <div style='font-size: 0.9rem;'>Open: {info.get('regularMarketOpen', 'N/A')}$</div>
-                <div style='font-size: 0.9rem;'>Bid: {bid}$</div>
-                <div style='font-size: 0.9rem;'>Earnings Date: {info.get('earningsDate', 'N/A')}</div>
-                <div style='font-size: 0.9rem;'>Dividend & Yield: {info.get('dividendRate', 'N/A')} ({info.get('dividendYield', 0)*100:.2f}%)</div>
-                <div style='font-size: 0.9rem;'>Ex-Dividend Date: {info.get('exDividendDate', 'N/A')}</div>
-                <div style='font-size: 0.9rem;'>1y Target Est: {info.get('targetMeanPrice', 'N/A')}$</div>
-                <div style='font-size: 0.9rem;'>Market Cap (Intraday): {info.get('marketCap', 0)/1e9:.2f}B$</div>
-                <div style='font-size: 0.9rem;'>Sector: {info.get('sector', 'N/A')}</div>
-                <div style='font-size: 0.9rem;'>Beta: {info.get('beta', 'N/A')}</div>
-                <div style='font-size: 0.9rem;'>PE Ratio: {info.get('trailingPE', 'N/A')}</div>
+            <div style='padding: 0.5rem; border: 1px solid #ccc; border-radius: 5px;'>
+                <div>Previous Close: {info.get('regularMarketPreviousClose', 'N/A')}$</div>
+                <div>Open: {info.get('regularMarketOpen', 'N/A')}$</div>
+                <div>Bid: {bid}$</div>
+                <div>Earnings Date: {info.get('earningsDate', 'N/A')}</div>
+                <div>Dividend & Yield: {info.get('dividendRate', 'N/A')} ({info.get('dividendYield', 0)*100:.2f}%)</div>
+                <div>Ex-Dividend Date: {info.get('exDividendDate', 'N/A')}</div>
+                <div>1y Target Est: {info.get('targetMeanPrice', 'N/A')}$</div>
+                <div>Market Cap: {info.get('marketCap', 0)/1e9:.2f}B$</div>
+                <div>Sector: {info.get('sector', 'N/A')}</div>
+                <div>Beta: {info.get('beta', 'N/A')}</div>
+                <div>PE Ratio: {info.get('trailingPE', 'N/A')}</div>
             </div>
             """,
             unsafe_allow_html=True
@@ -194,82 +207,67 @@ with col1:
 with col2:
     try:
         chart_type = st.radio("Chart Type", ["Candlestick", "Line"], horizontal=True)
-        fig = create_price_chart(history, chart_type=chart_type)
-        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": True, "modeBarButtonsToAdd": ["drawline", "drawrect", "eraseshape"]})
+        create_price_chart(history, chart_type, selected_indicators, key="main_chart")
     except Exception as e:
         st.error(f"Error displaying chart: {str(e)}")
 
 # Analyse Technique Avancée (RSI et MACD)
 st.subheader("Advanced Technical Analysis")
 try:
-    df = calculate_technical(history)
     col1, col2 = st.columns(2)
     with col1:
         fig_rsi = go.Figure()
-        fig_rsi.add_trace(go.Scatter(x=df.index, y=df['RSI'], line=dict(color=positive_color), name="RSI"))
+        fig_rsi.add_trace(go.Scatter(x=history.index, y=history['RSI'], line=dict(color=positive_color), name="RSI"))
         fig_rsi.update_layout(title="RSI (14 days)", yaxis_title="RSI", height=300, showlegend=False, template="plotly_white")
         fig_rsi.add_hline(y=70, line_dash="dash", line_color="red", annotation_text="Overbought")
         fig_rsi.add_hline(y=30, line_dash="dash", line_color="green", annotation_text="Oversold")
-        st.plotly_chart(fig_rsi, use_container_width=True)
+        st.plotly_chart(fig_rsi, use_container_width=True, key="rsi_chart")
     with col2:
         fig_macd = go.Figure()
-        fig_macd.add_trace(go.Scatter(x=df.index, y=df['MACD'], line=dict(color=positive_color), name="MACD"))
-        fig_macd.add_trace(go.Scatter(x=df.index, y=df['MACD_Signal'], line=dict(color=negative_color), name="Signal"))
+        fig_macd.add_trace(go.Scatter(x=history.index, y=history['MACD'], line=dict(color=positive_color), name="MACD"))
+        fig_macd.add_trace(go.Scatter(x=history.index, y=history['MACD_Signal'], line=dict(color=negative_color), name="Signal"))
         fig_macd.update_layout(title="MACD (12/26/9)", yaxis_title="MACD", height=300, template="plotly_white")
-        st.plotly_chart(fig_macd, use_container_width=True)
+        st.plotly_chart(fig_macd, use_container_width=True, key="macd_chart")
 except Exception as e:
     st.error(f"Error in technical analysis: {str(e)}")
 
 # Oscillateurs Techniques (Jauges)
 st.subheader("Technical Oscillators")
 try:
-    latest = df.iloc[-1]
+    latest = history.iloc[-1]
     cols = st.columns(4)
     oscillators = [
         ("RSI", latest['RSI'], 0, 100, "Relative Strength Index: Measures speed and change of price movements (0-100). Identifies overbought (>70) or oversold (<30) conditions."),
         ("STOCH_K", latest['STOCH_K'], 0, 100, "Stochastic Oscillator: Compares closing price to its range over 14 days (0-100). Highlights overbought (>80) or oversold (<20) levels."),
         ("CCI", latest['CCI'], -200, 200, "Commodity Channel Index: Measures price deviation from average (-200 to 200). Extreme values indicate potential reversals."),
         ("WILLR", latest['WILLR'], -100, 0, "Williams %R: Momentum oscillator (0 to -100). Identifies overbought (>-20) or oversold (<-80) levels."),
-        ("MACD", latest['MACD'] - latest['MACD_Signal'], -10, 10, "MACD Difference: Tracks momentum by comparing two moving averages. Positive/negative indicates bullish/bearish momentum."),
-        ("ATR", latest['ATR'], 0, max(20, latest['ATR'] * 1.5), "Average True Range: Measures volatility based on price range (higher = more volatile)."),
+        ("MACD", latest['MACD'] - latest['MACD_Signal'], -10, 10, "MACD Difference: Tracks momentum by comparing two moving averages."),
+        ("ATR", latest['ATR'], 0, max(20, latest['ATR'] * 1.5), "Average True Range: Measures volatility based on price range."),
         ("CHAIKIN", latest['CHAIKIN'], -1e9, 1e9, "Chaikin Oscillator: Combines price and volume to assess momentum."),
         ("UO", latest['UO'], 0, 100, "Ultimate Oscillator: Uses multiple timeframes (7/14/28) to measure momentum (0-100).")
     ]
     for i, (name, value, min_val, max_val, desc) in enumerate(oscillators):
         with cols[i % 4]:
-            fig_gauge = go.Figure(go.Indicator(
-                mode="gauge+number",
-                value=value if pd.notna(value) else min_val,
-                domain={'x': [0, 1], 'y': [0, 1]},
-                title={'text': name},
-                gauge={
-                    'shape': "bullet",
-                    'axis': {'range': [min_val, max_val]},
-                    'bar': {'color': positive_color if value >= 0 else negative_color},
-                    'threshold': {'line': {'color': "red", 'width': 2}, 'thickness': 0.75, 'value': max_val * 0.8 if max_val > 0 else min_val * 0.8}
-                }
-            ))
-            fig_gauge.update_layout(height=200, margin=dict(t=40, b=20))
-            st.plotly_chart(fig_gauge, use_container_width=True)
+            create_gauge(name, value, min_val, max_val, desc, key=f"gauge_{name.lower()}")
             st.write(desc)
 except Exception as e:
     st.error(f"Error in oscillators: {str(e)}")
 
 # Analyse Fondamentale
+st.subheader("Fundamental Analysis")
 try:
-    st.subheader("Fundamental Analysis")
     tab1, tab2, tab3, tab4, tab5 = st.tabs(["Valuation", "Finances", "Dividends", "Competitors", "Performance Overview"])
     with tab1:
         valuation_data = {
             "Ratio": ["P/E", "P/S", "EV/EBITDA", "P/B", "Dividend Yield", "Beta (5Y Monthly)", "EPS (TTM)"],
             "Value": [
-                asset_data['info'].get('trailingPE', 'N/A'),
-                asset_data['info'].get('priceToSalesTrailing12Months', 'N/A'),
-                asset_data['info'].get('enterpriseToEbitda', 'N/A'),
-                asset_data['info'].get('priceToBook', 'N/A'),
-                f"{asset_data['info'].get('dividendYield', 0)*100:.2f}%",
-                asset_data['info'].get('beta', 'N/A'),
-                asset_data['info'].get('trailingEps', 'N/A')
+                info.get('trailingPE', 'N/A'),
+                info.get('priceToSalesTrailing12Months', 'N/A'),
+                info.get('enterpriseToEbitda', 'N/A'),
+                info.get('priceToBook', 'N/A'),
+                f"{info.get('dividendYield', 0)*100:.2f}%",
+                info.get('beta', 'N/A'),
+                info.get('trailingEps', 'N/A')
             ]
         }
         st.dataframe(pd.DataFrame(valuation_data), hide_index=True)
@@ -287,7 +285,7 @@ try:
         else:
             st.warning("Financial data not available")
     with tab3:
-        st.metric("Dividend Yield", f"{asset_data['info'].get('dividendYield', 0)*100:.2f}%", f"Payout Ratio: {asset_data['info'].get('payoutRatio', 'N/A')}")
+        st.metric("Dividend Yield", f"{info.get('dividendYield', 0)*100:.2f}%", f"Payout Ratio: {info.get('payoutRatio', 'N/A')}")
         if asset_data['dividends'] is not None and not asset_data['dividends'].empty:
             st.write("### Dividend History (Last 5 Years)")
             five_years_ago = datetime.now().year - 5
@@ -301,7 +299,6 @@ try:
     with tab4:
         st.write("### Major Competitors")
         st.write("This is a Lite/Demo version. Competitor data is not available in this release.")
-        st.write("Here are some potential competitors based on sector:")
         sector = info.get("sector", "Unknown")
         if sector == "Technology":
             st.write("- Microsoft (MSFT)\n- Google (GOOGL)\n- Amazon (AMZN)")
@@ -320,7 +317,6 @@ try:
         st.dataframe(pd.DataFrame(performance_data), hide_index=True)
 
         st.write("### Discounted Cash Flow (DCF) Analysis")
-        st.write("Estimate the intrinsic value of the asset by adjusting the sliders below.")
         if asset_data['cashflow'] is not None and 'Free Cash Flow' in asset_data['cashflow'].index:
             fcf = asset_data['cashflow'].loc['Free Cash Flow'].iloc[0]
             col1, col2, col3 = st.columns(3)
@@ -335,7 +331,7 @@ try:
                 cashflows = [fcf * (1 + growth/100)**i for i in range(1, years+1)]
                 terminal_value = cashflows[-1] * (1 + terminal/100) / ((discount - terminal)/100)
                 dcf_value = sum(cf / (1 + discount/100)**i for i, cf in enumerate(cashflows, 1)) + terminal_value / (1 + discount/100)**years
-                current_mc = asset_data['info'].get('marketCap', 0)
+                current_mc = info.get('marketCap', 0)
                 delta = dcf_value - current_mc
                 st.metric("Estimated DCF Value", f"{dcf_value/1e9:.2f}B$", delta=f"{delta/1e9:.2f}B$ vs Market Cap", delta_color="normal" if delta > 0 else "inverse")
             else:
@@ -348,7 +344,6 @@ except Exception as e:
 # Revenue and Earnings
 st.subheader("Revenue and Earnings")
 try:
-    st.write("### Revenue and Earnings (Last 4 Quarters)")
     if asset_data['quarterly_earnings'] is not None and not asset_data['quarterly_earnings'].empty:
         quarterly_earnings = asset_data['quarterly_earnings'].tail(4)
         revenue_data = {
@@ -360,54 +355,27 @@ try:
         fig_bar.add_trace(go.Bar(x=revenue_data["Quarter"], y=revenue_data["Revenue (B$)"], name="Revenue (B$)", marker_color=positive_color))
         fig_bar.add_trace(go.Bar(x=revenue_data["Quarter"], y=revenue_data["Earnings (EPS)"], name="Earnings (EPS)", marker_color=negative_color))
         fig_bar.update_layout(barmode='group', title="Revenue and Earnings by Quarter (Last 4 Quarters)", height=400)
-        st.plotly_chart(fig_bar, use_container_width=True)
+        st.plotly_chart(fig_bar, use_container_width=True, key="revenue_earnings_chart")
     else:
         st.write("Données trimestrielles non disponibles via yfinance.")
 except Exception as e:
     st.error(f"Error in revenue and earnings: {str(e)}")
 
-# Earnings and Revenue Estimates
-st.subheader("Earnings and Revenue Estimates")
-try:
-    st.write("### Earnings Estimates")
-    st.write("Earnings estimates not fully available via yfinance free API. Static example shown below:")
-    earnings_estimates = {
-        "Metric": ["No. of Analysts", "Avg. Estimate", "Low Estimate", "High Estimate", "Prior Year EPS"],
-        "Current Qtr": [40, 1.05, 0.95, 1.15, 0.94],
-        "Next Qtr": [38, 1.20, 1.10, 1.30, 0.62],
-        "Current Year": [45, 4.85, 4.50, 5.20, 3.80],
-        "Next Year": [42, 5.90, 5.50, 6.30, 4.85]
-    }
-    st.dataframe(pd.DataFrame(earnings_estimates), hide_index=True)
-
-    st.write("### Revenue Estimates")
-    st.write("Revenue estimates not fully available via yfinance free API. Static example shown below:")
-    revenue_estimates = {
-        "Metric": ["No. of Analysts", "Avg. Estimate (B$)", "Low Estimate (B$)", "High Estimate (B$)", "Prior Year Sales (B$)"],
-        "Current Qtr": [40, 26.50, 25.80, 27.20, 22.10],
-        "Next Qtr": [38, 28.90, 28.00, 29.80, 13.51],
-        "Current Year": [45, 115.20, 112.00, 118.50, 61.37],
-        "Next Year": [42, 140.30, 135.00, 145.60, 115.20]
-    }
-    st.dataframe(pd.DataFrame(revenue_estimates), hide_index=True)
-except Exception as e:
-    st.error(f"Error in estimates: {str(e)}")
-
-# Actionnaires et Initiés
+# Shareholders and Insiders
 st.subheader("Shareholders and Insiders")
 try:
     st.write("### Major Shareholders")
     if asset_data['major_holders'] is not None and not asset_data['major_holders'].empty:
         major_holders = asset_data['major_holders']
-        if len(major_holders) >= 2:
+        if major_holders.shape[0] > 0:
             shareholders = {
-                "Holder": ["Insiders", "Institutions"],
-                "% Out": [major_holders.iloc[0, 1], major_holders.iloc[1, 1]],
-                "Shares": [major_holders.iloc[0, 0], major_holders.iloc[1, 0]]
+                "Holder": ["Insiders" if i == 0 else "Institutions" if i == 1 else f"Holder {i+1}" for i in range(major_holders.shape[0])],
+                "% Out": [major_holders.iloc[i, 1] if major_holders.shape[1] > 1 else "N/A" for i in range(major_holders.shape[0])],
+                "Shares": [major_holders.iloc[i, 0] for i in range(major_holders.shape[0])]
             }
             df_shareholders = pd.DataFrame(shareholders)
-            df_shareholders['% Out'] = df_shareholders['% Out'].apply(lambda x: f"{x:.2f}%")
-            df_shareholders['Shares'] = df_shareholders['Shares'].apply(lambda x: f"{x:,.0f}")
+            df_shareholders['% Out'] = df_shareholders['% Out'].apply(lambda x: f"{x:.2f}%" if pd.notna(x) and isinstance(x, (int, float)) else "N/A")
+            df_shareholders['Shares'] = df_shareholders['Shares'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) and isinstance(x, (int, float)) else "N/A")
             st.dataframe(df_shareholders, hide_index=True)
         else:
             st.write("Données insuffisantes via yfinance pour ce symbole.")
@@ -418,7 +386,6 @@ try:
     if asset_data['institutional_holders'] is not None and not asset_data['institutional_holders'].empty:
         inst_holders = asset_data['institutional_holders'].copy()
         inst_holders['Value (B$)'] = inst_holders['Value'] / 1e9
-        inst_holders = inst_holders.rename(columns={'Value': 'Value_raw'})
         inst_holders['Shares'] = inst_holders['Shares'].astype(int)
         inst_holders['% Out'] = inst_holders['% Out'] * 100
         display_df = inst_holders[['Holder', 'Shares', 'Date Reported', '% Out', 'Value (B$)']].copy()
@@ -428,9 +395,6 @@ try:
         st.dataframe(display_df, hide_index=True)
     else:
         st.write("Non disponible via yfinance pour ce symbole.")
-
-    st.write("### Insider Holdings (Last 24 Months - SEC Forms 3 & 4)")
-    st.write("Non disponible via yfinance. Ces données nécessitent un accès aux dépôts SEC (Forms 3 & 4).")
 except Exception as e:
     st.error(f"Erreur lors de la récupération des données actionnaires/initiés : {str(e)}")
 
