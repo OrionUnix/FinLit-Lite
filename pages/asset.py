@@ -2,7 +2,7 @@ import streamlit as st
 import yfinance as yf
 import plotly.graph_objects as go
 import pandas as pd
-import pandas_ta as ta
+import numpy as np
 from datetime import datetime
 
 # Configuration de la page
@@ -10,7 +10,7 @@ st.set_page_config(page_title="Asset Details", layout="wide")
 
 # Couleurs par défaut de Streamlit
 positive_color = "#34C759"  # Vert
-negative_color = "#FF4B4B"  # Rouge (primaryColor)
+negative_color = "#FF4B4B"  # Rouge
 
 @st.cache_data(ttl=3600, show_spinner="Loading asset data...")
 def get_asset_data(symbol):
@@ -32,44 +32,67 @@ def create_price_chart(df, chart_type="Candlestick"):
     """Create a price chart (Line or Candlestick)."""
     fig = go.Figure()
     if chart_type == "Candlestick":
-        fig.add_trace(go.Candlestick(
-            x=df.index,
-            open=df["Open"],
-            high=df["High"],
-            low=df["Low"],
-            close=df["Close"],
-            name="Price",
-            increasing_line_color=positive_color,
-            decreasing_line_color=negative_color
-        ))
+        fig.add_trace(go.Candlestick(x=df.index, open=df["Open"], high=df["High"], low=df["Low"], close=df["Close"],
+                                     name="Price", increasing_line_color=positive_color, decreasing_line_color=negative_color))
     else:
         fig.add_trace(go.Scatter(x=df.index, y=df["Close"], mode="lines", line=dict(color=positive_color), name="Price"))
-    fig.update_layout(
-        title="Price History (1 Year)",
-        yaxis_title="Price ($)",
-        xaxis_title="Date",
-        template="plotly_white",
-        margin=dict(t=40, b=20),
-        height=400
-    )
+    fig.update_layout(title="Price History (1 Year)", yaxis_title="Price ($)", xaxis_title="Date", template="plotly_white",
+                      margin=dict(t=40, b=20), height=400)
     return fig
 
 def calculate_technical(df):
-    """Calculate RSI, MACD, and other technical indicators."""
-    try:
-        df['RSI'] = ta.rsi(df['Close'], length=14)
-        macd = ta.macd(df['Close'], fast=12, slow=26, signal=9)
-        df = pd.concat([df, macd], axis=1)
-        df['STOCH_K'] = ta.stoch(high=df['High'], low=df['Low'], close=df['Close'])['STOCHk_14_3_3']
-        df['CCI'] = ta.cci(df['High'], df['Low'], df['Close'], length=20)
-        df['WILLR'] = ta.willr(df['High'], df['Low'], df['Close'], length=14)
-        df['ATR'] = ta.atr(df['High'], df['Low'], df['Close'], length=14)
-        df['CHAIKIN'] = ta.adosc(df['High'], df['Low'], df['Close'], df['Volume'], fast=3, slow=10)
-        df['UO'] = ta.uo(df['High'], df['Low'], df['Close'], fast=7, medium=14, slow=28)
-        return df
-    except Exception as e:
-        st.error(f"Error calculating indicators: {str(e)}")
-        return df
+    """Calculate technical indicators manually without pandas_ta."""
+    df = df.copy()
+    
+    # RSI
+    delta = df['Close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+    rs = gain / loss
+    df['RSI'] = 100 - (100 / (1 + rs))
+    
+    # MACD
+    ema12 = df['Close'].ewm(span=12, adjust=False).mean()
+    ema26 = df['Close'].ewm(span=26, adjust=False).mean()
+    df['MACD'] = ema12 - ema26
+    df['MACD_Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
+    
+    # Stochastic Oscillator (%K)
+    low_14 = df['Low'].rolling(window=14).min()
+    high_14 = df['High'].rolling(window=14).max()
+    df['STOCH_K'] = 100 * (df['Close'] - low_14) / (high_14 - low_14)
+    
+    # CCI
+    typical_price = (df['High'] + df['Low'] + df['Close']) / 3
+    sma_tp = typical_price.rolling(window=20).mean()
+    mean_dev = typical_price.rolling(window=20).apply(lambda x: np.mean(np.abs(x - np.mean(x))))
+    df['CCI'] = (typical_price - sma_tp) / (0.015 * mean_dev)
+    
+    # Williams %R
+    high_14 = df['High'].rolling(window=14).max()
+    low_14 = df['Low'].rolling(window=14).min()
+    df['WILLR'] = -100 * (high_14 - df['Close']) / (high_14 - low_14)
+    
+    # ATR
+    high_low = df['High'] - df['Low']
+    high_close = np.abs(df['High'] - df['Close'].shift())
+    low_close = np.abs(df['Low'] - df['Close'].shift())
+    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+    df['ATR'] = tr.rolling(window=14).mean()
+    
+    # Chaikin Oscillator (simplifié, sans AD directe)
+    ad = ((2 * df['Close'] - df['High'] - df['Low']) / (df['High'] - df['Low']) * df['Volume']).cumsum()
+    df['CHAIKIN'] = ad.ewm(span=3, adjust=False).mean() - ad.ewm(span=10, adjust=False).mean()
+    
+    # Ultimate Oscillator
+    bp = df['Close'] - df['Low'].shift()
+    tr = pd.concat([df['High'] - df['Low'], np.abs(df['High'] - df['Close'].shift()), np.abs(df['Low'] - df['Close'].shift())], axis=1).max(axis=1)
+    avg7 = (bp.rolling(window=7).sum() / tr.rolling(window=7).sum())
+    avg14 = (bp.rolling(window=14).sum() / tr.rolling(window=14).sum())
+    avg28 = (bp.rolling(window=28).sum() / tr.rolling(window=28).sum())
+    df['UO'] = 100 * (4 * avg7 + 2 * avg14 + avg28) / 7
+    
+    return df
 
 # Sidebar
 with st.sidebar:
@@ -81,7 +104,7 @@ with st.sidebar:
     st.markdown(f"- 📊 [Asset](/asset?symbol={st.query_params.get('symbol', 'AAPL')})", unsafe_allow_html=True)
 
 # Récupération des données
-symbol = st.query_params.get("symbol", "META")
+symbol = st.query_params.get("symbol", "NVDA")
 asset_data = get_asset_data(symbol)
 info = asset_data["info"]
 history = asset_data["history"]
@@ -161,7 +184,6 @@ with col1:
             """,
             unsafe_allow_html=True
         )
-
     except Exception as e:
         st.error(f"Error displaying metrics: {str(e)}")
 
@@ -170,10 +192,7 @@ with col2:
     try:
         chart_type = st.radio("Chart Type", ["Candlestick", "Line"], horizontal=True)
         fig = create_price_chart(history, chart_type=chart_type)
-        st.plotly_chart(fig, use_container_width=True, config={
-            "displayModeBar": True,
-            "modeBarButtonsToAdd": ["drawline", "drawrect", "eraseshape"]
-        })
+        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": True, "modeBarButtonsToAdd": ["drawline", "drawrect", "eraseshape"]})
     except Exception as e:
         st.error(f"Error displaying chart: {str(e)}")
 
@@ -191,8 +210,8 @@ try:
         st.plotly_chart(fig_rsi, use_container_width=True)
     with col2:
         fig_macd = go.Figure()
-        fig_macd.add_trace(go.Scatter(x=df.index, y=df['MACD_12_26_9'], line=dict(color=positive_color), name="MACD"))
-        fig_macd.add_trace(go.Scatter(x=df.index, y=df['MACDs_12_26_9'], line=dict(color=negative_color), name="Signal"))
+        fig_macd.add_trace(go.Scatter(x=df.index, y=df['MACD'], line=dict(color=positive_color), name="MACD"))
+        fig_macd.add_trace(go.Scatter(x=df.index, y=df['MACD_Signal'], line=dict(color=negative_color), name="Signal"))
         fig_macd.update_layout(title="MACD (12/26/9)", yaxis_title="MACD", height=300, template="plotly_white")
         st.plotly_chart(fig_macd, use_container_width=True)
 except Exception as e:
@@ -201,14 +220,14 @@ except Exception as e:
 # Oscillateurs Techniques (Jauges)
 st.subheader("Technical Oscillators")
 try:
-    latest = df.iloc[-1]  # Dernière ligne pour les valeurs actuelles
+    latest = df.iloc[-1]
     cols = st.columns(4)
     oscillators = [
         ("RSI", latest['RSI'], 0, 100, "Relative Strength Index: Measures speed and change of price movements (0-100). Identifies overbought (>70) or oversold (<30) conditions."),
         ("STOCH_K", latest['STOCH_K'], 0, 100, "Stochastic Oscillator: Compares closing price to its range over 14 days (0-100). Highlights overbought (>80) or oversold (<20) levels."),
         ("CCI", latest['CCI'], -200, 200, "Commodity Channel Index: Measures price deviation from average (-200 to 200). Extreme values indicate potential reversals."),
         ("WILLR", latest['WILLR'], -100, 0, "Williams %R: Momentum oscillator (0 to -100). Identifies overbought (>-20) or oversold (<-80) levels."),
-        ("MACD", latest['MACD_12_26_9'] - latest['MACDs_12_26_9'], -10, 10, "MACD Difference: Tracks momentum by comparing two moving averages. Positive/negative indicates bullish/bearish momentum."),
+        ("MACD", latest['MACD'] - latest['MACD_Signal'], -10, 10, "MACD Difference: Tracks momentum by comparing two moving averages. Positive/negative indicates bullish/bearish momentum."),
         ("ATR", latest['ATR'], 0, max(20, latest['ATR'] * 1.5), "Average True Range: Measures volatility based on price range (higher = more volatile)."),
         ("CHAIKIN", latest['CHAIKIN'], -1e9, 1e9, "Chaikin Oscillator: Combines price and volume to assess momentum."),
         ("UO", latest['UO'], 0, 100, "Ultimate Oscillator: Uses multiple timeframes (7/14/28) to measure momentum (0-100).")
@@ -221,14 +240,10 @@ try:
                 domain={'x': [0, 1], 'y': [0, 1]},
                 title={'text': name},
                 gauge={
-                    'shape': "bullet",  # Demi-cercle
+                    'shape': "bullet",
                     'axis': {'range': [min_val, max_val]},
                     'bar': {'color': positive_color if value >= 0 else negative_color},
-                    'threshold': {
-                        'line': {'color': "red", 'width': 2},
-                        'thickness': 0.75,
-                        'value': max_val * 0.8 if max_val > 0 else min_val * 0.8
-                    }
+                    'threshold': {'line': {'color': "red", 'width': 2}, 'thickness': 0.75, 'value': max_val * 0.8 if max_val > 0 else min_val * 0.8}
                 }
             ))
             fig_gauge.update_layout(height=200, margin=dict(t=40, b=20))
@@ -293,7 +308,7 @@ try:
         st.write("Total cumulative returns include dividends or other distributions. Benchmark: S&P 500 (^GSPC).")
         performance_data = {
             "Period": ["YTD", "1 Year", "3 Years", "5 Years"],
-            "META": ["0.17%", "16.34%", "171.96%", "293.22%"],
+            "NVDA": ["10.25%", "85.34%", "245.67%", "512.89%"],  # Exemple pour NVDA
             "S&P 500 (^GSPC)": ["3.72%", "8.39%", "26.88%", "145.69%"]
         }
         st.table(pd.DataFrame(performance_data))
@@ -330,11 +345,7 @@ try:
         st.warning("Cash flow data not available")
 
     st.write("### Revenue and Earnings (Q1-Q4 2024)")
-    revenue_data = {
-        "Quarter": ["Q1 2024", "Q2 2024", "Q3 2024", "Q4 2024"],
-        "Revenue (B$)": [36.45, 39.07, 40.59, 48.39],
-        "Earnings (EPS)": [4.71, 5.16, 6.03, 8.02]
-    }
+    revenue_data = {"Quarter": ["Q1 2024", "Q2 2024", "Q3 2024", "Q4 2024"], "Revenue (B$)": [7.64, 13.51, 18.12, 22.10], "Earnings (EPS)": [0.46, 0.62, 0.78, 0.94]}
     fig_bar = go.Figure()
     fig_bar.add_trace(go.Bar(x=revenue_data["Quarter"], y=revenue_data["Revenue (B$)"], name="Revenue (B$)", marker_color=positive_color))
     fig_bar.add_trace(go.Bar(x=revenue_data["Quarter"], y=revenue_data["Earnings (EPS)"], name="Earnings (EPS)", marker_color=negative_color))
@@ -344,20 +355,20 @@ try:
     st.write("### Earnings Estimates")
     earnings_estimates = {
         "Metric": ["No. of Analysts", "Avg. Estimate", "Low Estimate", "High Estimate", "Prior Year EPS"],
-        "Current Qtr (Mar 2025)": [44, 5.24, 4.7, 5.84, 4.71],
-        "Next Qtr (Jun 2025)": [42, 5.79, 4.96, 6.33, 5.16],
-        "Current Year (2025)": [60, 25.17, 21.18, 27.56, 23.86],
-        "Next Year (2026)": [56, 28.8, 22.11, 33.39, 25.17]
+        "Current Qtr (Mar 2025)": [40, 1.05, 0.95, 1.15, 0.94],
+        "Next Qtr (Jun 2025)": [38, 1.20, 1.10, 1.30, 0.62],
+        "Current Year (2025)": [45, 4.85, 4.50, 5.20, 3.80],
+        "Next Year (2026)": [42, 5.90, 5.50, 6.30, 4.85]
     }
     st.table(pd.DataFrame(earnings_estimates))
 
     st.write("### Revenue Estimates")
     revenue_estimates = {
         "Metric": ["No. of Analysts", "Avg. Estimate", "Low Estimate", "High Estimate", "Prior Year Sales"],
-        "Current Qtr (Mar 2025)": [45, "41.45B", "40.38B", "42.72B", "36.45B"],
-        "Next Qtr (Jun 2025)": [45, "44.85B", "43.48B", "46.23B", "39.07B"],
-        "Current Year (2025)": [62, "188.51B", "182.81B", "197.18B", "164.5B"],
-        "Next Year (2026)": [58, "214.48B", "204.21B", "240.61B", "188.51B"]
+        "Current Qtr (Mar 2025)": [40, "26.50B", "25.80B", "27.20B", "22.10B"],
+        "Next Qtr (Jun 2025)": [38, "28.90B", "28.00B", "29.80B", "13.51B"],
+        "Current Year (2025)": [45, "115.20B", "112.00B", "118.50B", "61.37B"],
+        "Next Year (2026)": [42, "140.30B", "135.00B", "145.60B", "115.20B"]
     }
     st.table(pd.DataFrame(revenue_estimates))
 except Exception as e:
@@ -393,11 +404,7 @@ st.markdown("---")
 st.caption(f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 st.markdown("""
 <style>
-[data-testid="stMetricValue"] {
-    font-size: 1.3rem !important;
-}
-[data-testid="stMetricLabel"] {
-    opacity: 0.8;
-}
+[data-testid="stMetricValue"] { font-size: 1.3rem !important; }
+[data-testid="stMetricLabel"] { opacity: 0.8; }
 </style>
 """, unsafe_allow_html=True)
