@@ -1,3 +1,6 @@
+![screenshoot of FinLit](screen.png)
+
+
 # FinLite - Lightweight Financial Terminal (Demo)
 
 FinLite is a free, open-source financial terminal built in Python, designed as a lightweight demo for portfolio analysis and market indices tracking. This version is optimized for deployment on Streamlit Community Cloud.
