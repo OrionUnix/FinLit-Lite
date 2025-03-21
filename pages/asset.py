@@ -19,10 +19,13 @@ def get_asset_data(symbol):
         asset = yf.Ticker(symbol)
         return {
             "info": asset.info,
-            "history": asset.history(period="1y", interval="1d"),
+            "history": asset.history(period="1y", interval="1d", auto_adjust=False),
             "financials": asset.financials,
             "cashflow": asset.cashflow,
-            "dividends": asset.dividends
+            "dividends": asset.dividends,
+            "major_holders": asset.major_holders,
+            "institutional_holders": asset.institutional_holders,
+            "quarterly_earnings": asset.quarterly_earnings
         }
     except Exception as e:
         st.error(f"Error retrieving data: {str(e)}")
@@ -172,9 +175,9 @@ with col1:
                 <div style='font-size: 0.9rem;'>Previous Close: {info.get('regularMarketPreviousClose', 'N/A')}$</div>
                 <div style='font-size: 0.9rem;'>Open: {info.get('regularMarketOpen', 'N/A')}$</div>
                 <div style='font-size: 0.9rem;'>Bid: {bid}$</div>
-                <div style='font-size: 0.9rem;'>Earnings Date: Apr 22, 2025 - Apr 28, 2025</div>
-                <div style='font-size: 0.9rem;'>Dividend & Yield: 2.10 (0.36%)</div>
-                <div style='font-size: 0.9rem;'>Ex-Dividend Date: Mar 14, 2025</div>
+                <div style='font-size: 0.9rem;'>Earnings Date: {info.get('earningsDate', 'N/A')}</div>
+                <div style='font-size: 0.9rem;'>Dividend & Yield: {info.get('dividendRate', 'N/A')} ({info.get('dividendYield', 0)*100:.2f}%)</div>
+                <div style='font-size: 0.9rem;'>Ex-Dividend Date: {info.get('exDividendDate', 'N/A')}</div>
                 <div style='font-size: 0.9rem;'>1y Target Est: {info.get('targetMeanPrice', 'N/A')}$</div>
                 <div style='font-size: 0.9rem;'>Market Cap (Intraday): {info.get('marketCap', 0)/1e9:.2f}B$</div>
                 <div style='font-size: 0.9rem;'>Sector: {info.get('sector', 'N/A')}</div>
@@ -258,15 +261,18 @@ try:
     tab1, tab2, tab3, tab4, tab5 = st.tabs(["Valuation", "Finances", "Dividends", "Competitors", "Performance Overview"])
     with tab1:
         valuation_data = {
-            "P/E": asset_data['info'].get('trailingPE', 'N/A'),
-            "P/S": asset_data['info'].get('priceToSalesTrailing12Months', 'N/A'),
-            "EV/EBITDA": asset_data['info'].get('enterpriseToEbitda', 'N/A'),
-            "P/B": asset_data['info'].get('priceToBook', 'N/A'),
-            "Dividend Yield": f"{asset_data['info'].get('dividendYield', 0)*100:.2f}%",
-            "Beta (5Y Monthly)": asset_data['info'].get('beta', 'N/A'),
-            "EPS (TTM)": asset_data['info'].get('trailingEps', 'N/A')
+            "Ratio": ["P/E", "P/S", "EV/EBITDA", "P/B", "Dividend Yield", "Beta (5Y Monthly)", "EPS (TTM)"],
+            "Value": [
+                asset_data['info'].get('trailingPE', 'N/A'),
+                asset_data['info'].get('priceToSalesTrailing12Months', 'N/A'),
+                asset_data['info'].get('enterpriseToEbitda', 'N/A'),
+                asset_data['info'].get('priceToBook', 'N/A'),
+                f"{asset_data['info'].get('dividendYield', 0)*100:.2f}%",
+                asset_data['info'].get('beta', 'N/A'),
+                asset_data['info'].get('trailingEps', 'N/A')
+            ]
         }
-        st.table(pd.DataFrame(valuation_data.items(), columns=["Ratio", "Value"]))
+        st.table(pd.DataFrame(valuation_data).reset_index(drop=True))
     with tab2:
         if asset_data['financials'] is not None and not asset_data['financials'].empty:
             rev = asset_data['financials'].loc['Total Revenue'].iloc[0] if 'Total Revenue' in asset_data['financials'].index else 0
@@ -287,7 +293,7 @@ try:
             five_years_ago = datetime.now().year - 5
             div_history = asset_data['dividends'][asset_data['dividends'].index.year >= five_years_ago]
             if not div_history.empty:
-                st.table(div_history.rename("Dividend ($)").to_frame())
+                st.table(div_history.rename("Dividend ($)").to_frame().reset_index(drop=True))
             else:
                 st.write("No dividends paid in the last 5 years.")
         else:
@@ -308,96 +314,125 @@ try:
         st.write("Total cumulative returns include dividends or other distributions. Benchmark: S&P 500 (^GSPC).")
         performance_data = {
             "Period": ["YTD", "1 Year", "3 Years", "5 Years"],
-            "NVDA": ["10.25%", "85.34%", "245.67%", "512.89%"],  # Exemple pour NVDA
+            "Symbol": ["N/A", "N/A", "N/A", "N/A"],
             "S&P 500 (^GSPC)": ["3.72%", "8.39%", "26.88%", "145.69%"]
         }
-        st.table(pd.DataFrame(performance_data))
+        st.table(pd.DataFrame(performance_data).reset_index(drop=True))
+
+        st.write("### Discounted Cash Flow (DCF) Analysis")
+        st.write("Estimate the intrinsic value of the asset by adjusting the sliders below.")
+        if asset_data['cashflow'] is not None and 'Free Cash Flow' in asset_data['cashflow'].index:
+            fcf = asset_data['cashflow'].loc['Free Cash Flow'].iloc[0]
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                growth = st.slider("FCF Growth Rate (%)", 0.0, 20.0, 8.0, 0.5)
+            with col2:
+                discount = st.slider("Discount Rate (%)", 5.0, 15.0, 10.0, 0.5)
+            with col3:
+                terminal = st.slider("Terminal Growth Rate (%)", 0.0, 5.0, 2.5, 0.1)
+            if discount > terminal:
+                years = 5
+                cashflows = [fcf * (1 + growth/100)**i for i in range(1, years+1)]
+                terminal_value = cashflows[-1] * (1 + terminal/100) / ((discount - terminal)/100)
+                dcf_value = sum(cf / (1 + discount/100)**i for i, cf in enumerate(cashflows, 1)) + terminal_value / (1 + discount/100)**years
+                current_mc = asset_data['info'].get('marketCap', 0)
+                delta = dcf_value - current_mc
+                st.metric("Estimated DCF Value", f"{dcf_value/1e9:.2f}B$", delta=f"{delta/1e9:.2f}B$ vs Market Cap", delta_color="normal" if delta > 0 else "inverse")
+            else:
+                st.warning("Discount rate must be greater than terminal growth rate")
+        else:
+            st.warning("Cash flow data not available")
 except Exception as e:
     st.error(f"Error in fundamental analysis: {str(e)}")
 
-# DCF Valuation
-st.subheader("DCF Valuation")
-st.write("""
-### Discounted Cash Flow (DCF) Analysis
-Estimate the intrinsic value of the asset by adjusting the sliders below. The DCF model calculates the present value of future cash flows based on your inputs for Free Cash Flow (FCF) growth rate, discount rate, and terminal growth rate.
-""")
+# Revenue and Earnings
+st.subheader("Revenue and Earnings")
 try:
-    if asset_data['cashflow'] is not None and 'Free Cash Flow' in asset_data['cashflow'].index:
-        fcf = asset_data['cashflow'].loc['Free Cash Flow'].iloc[0]
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            growth = st.slider("FCF Growth Rate (%)", 0.0, 20.0, 8.0, 0.5)
-        with col2:
-            discount = st.slider("Discount Rate (%)", 5.0, 15.0, 10.0, 0.5)
-        with col3:
-            terminal = st.slider("Terminal Growth Rate (%)", 0.0, 5.0, 2.5, 0.1)
-        if discount > terminal:
-            years = 5
-            cashflows = [fcf * (1 + growth/100)**i for i in range(1, years+1)]
-            terminal_value = cashflows[-1] * (1 + terminal/100) / ((discount - terminal)/100)
-            dcf_value = sum(cf / (1 + discount/100)**i for i, cf in enumerate(cashflows, 1)) + terminal_value / (1 + discount/100)**years
-            current_mc = asset_data['info'].get('marketCap', 0)
-            delta = dcf_value - current_mc
-            st.metric("Estimated DCF Value", f"{dcf_value/1e9:.2f}B$", delta=f"{delta/1e9:.2f}B$ vs Market Cap", delta_color="normal" if delta > 0 else "inverse")
-        else:
-            st.warning("Discount rate must be greater than terminal growth rate")
+    st.write("### Revenue and Earnings (Last 4 Quarters)")
+    if asset_data['quarterly_earnings'] is not None and not asset_data['quarterly_earnings'].empty:
+        quarterly_earnings = asset_data['quarterly_earnings'].tail(4)
+        revenue_data = {
+            "Quarter": quarterly_earnings.index.strftime("Q%m %Y").tolist(),
+            "Revenue (B$)": (quarterly_earnings['Revenue'] / 1e9).tolist(),
+            "Earnings (EPS)": quarterly_earnings['Earnings'].tolist()
+        }
+        fig_bar = go.Figure()
+        fig_bar.add_trace(go.Bar(x=revenue_data["Quarter"], y=revenue_data["Revenue (B$)"], name="Revenue (B$)", marker_color=positive_color))
+        fig_bar.add_trace(go.Bar(x=revenue_data["Quarter"], y=revenue_data["Earnings (EPS)"], name="Earnings (EPS)", marker_color=negative_color))
+        fig_bar.update_layout(barmode='group', title="Revenue and Earnings by Quarter (Last 4 Quarters)", height=400)
+        st.plotly_chart(fig_bar, use_container_width=True)
     else:
-        st.warning("Cash flow data not available")
+        st.write("Données trimestrielles non disponibles via yfinance.")
+except Exception as e:
+    st.error(f"Error in revenue and earnings: {str(e)}")
 
-    st.write("### Revenue and Earnings (Q1-Q4 2024)")
-    revenue_data = {"Quarter": ["Q1 2024", "Q2 2024", "Q3 2024", "Q4 2024"], "Revenue (B$)": [7.64, 13.51, 18.12, 22.10], "Earnings (EPS)": [0.46, 0.62, 0.78, 0.94]}
-    fig_bar = go.Figure()
-    fig_bar.add_trace(go.Bar(x=revenue_data["Quarter"], y=revenue_data["Revenue (B$)"], name="Revenue (B$)", marker_color=positive_color))
-    fig_bar.add_trace(go.Bar(x=revenue_data["Quarter"], y=revenue_data["Earnings (EPS)"], name="Earnings (EPS)", marker_color=negative_color))
-    fig_bar.update_layout(barmode='group', title="Revenue and Earnings by Quarter (2024)", height=400)
-    st.plotly_chart(fig_bar, use_container_width=True)
-
+# Earnings and Revenue Estimates
+st.subheader("Earnings and Revenue Estimates")
+try:
     st.write("### Earnings Estimates")
+    st.write("Earnings estimates not fully available via yfinance free API. Static example shown below:")
     earnings_estimates = {
         "Metric": ["No. of Analysts", "Avg. Estimate", "Low Estimate", "High Estimate", "Prior Year EPS"],
-        "Current Qtr (Mar 2025)": [40, 1.05, 0.95, 1.15, 0.94],
-        "Next Qtr (Jun 2025)": [38, 1.20, 1.10, 1.30, 0.62],
-        "Current Year (2025)": [45, 4.85, 4.50, 5.20, 3.80],
-        "Next Year (2026)": [42, 5.90, 5.50, 6.30, 4.85]
+        "Current Qtr": [40, 1.05, 0.95, 1.15, 0.94],
+        "Next Qtr": [38, 1.20, 1.10, 1.30, 0.62],
+        "Current Year": [45, 4.85, 4.50, 5.20, 3.80],
+        "Next Year": [42, 5.90, 5.50, 6.30, 4.85]
     }
-    st.table(pd.DataFrame(earnings_estimates))
+    st.table(pd.DataFrame(earnings_estimates).reset_index(drop=True))
 
     st.write("### Revenue Estimates")
+    st.write("Revenue estimates not fully available via yfinance free API. Static example shown below:")
     revenue_estimates = {
-        "Metric": ["No. of Analysts", "Avg. Estimate", "Low Estimate", "High Estimate", "Prior Year Sales"],
-        "Current Qtr (Mar 2025)": [40, "26.50B", "25.80B", "27.20B", "22.10B"],
-        "Next Qtr (Jun 2025)": [38, "28.90B", "28.00B", "29.80B", "13.51B"],
-        "Current Year (2025)": [45, "115.20B", "112.00B", "118.50B", "61.37B"],
-        "Next Year (2026)": [42, "140.30B", "135.00B", "145.60B", "115.20B"]
+        "Metric": ["No. of Analysts", "Avg. Estimate (B$)", "Low Estimate (B$)", "High Estimate (B$)", "Prior Year Sales (B$)"],
+        "Current Qtr": [40, 26.50, 25.80, 27.20, 22.10],
+        "Next Qtr": [38, 28.90, 28.00, 29.80, 13.51],
+        "Current Year": [45, 115.20, 112.00, 118.50, 61.37],
+        "Next Year": [42, 140.30, 135.00, 145.60, 115.20]
     }
-    st.table(pd.DataFrame(revenue_estimates))
+    st.table(pd.DataFrame(revenue_estimates).reset_index(drop=True))
 except Exception as e:
-    st.error(f"Error in DCF calculation: {str(e)}")
+    st.error(f"Error in estimates: {str(e)}")
 
 # Actionnaires et Initiés
 st.subheader("Shareholders and Insiders")
 try:
     st.write("### Major Shareholders")
-    shareholders = {
-        "Holder": ["Vanguard Group Inc", "Blackrock Inc", "FMR, LLC", "State Street Corporation", "JPMorgan Chase & Co"],
-        "Shares": ["191.2M", "164.63M", "136.25M", "86.13M", "51.69M"],
-        "Date Reported": ["Dec 31, 2024"]*5,
-        "% Out": ["8.73%", "7.52%", "6.22%", "3.93%", "2.36%"],
-        "Value": ["112.04B", "96.48B", "79.84B", "50.47B", "30.29B"]
-    }
-    st.table(pd.DataFrame(shareholders))
+    if asset_data['major_holders'] is not None and not asset_data['major_holders'].empty:
+        major_holders = asset_data['major_holders']
+        if len(major_holders) >= 2:
+            shareholders = {
+                "Holder": ["Insiders", "Institutions"],
+                "% Out": [major_holders.iloc[0, 1], major_holders.iloc[1, 1]],
+                "Shares": [major_holders.iloc[0, 0], major_holders.iloc[1, 0]]
+            }
+            df_shareholders = pd.DataFrame(shareholders)
+            df_shareholders['% Out'] = df_shareholders['% Out'].apply(lambda x: f"{x:.2f}%")
+            df_shareholders['Shares'] = df_shareholders['Shares'].apply(lambda x: f"{x:,.0f}")
+            st.table(df_shareholders.reset_index(drop=True))
+        else:
+            st.write("Données insuffisantes via yfinance pour ce symbole.")
+    else:
+        st.write("Non disponible via yfinance pour ce symbole.")
+
+    st.write("### Institutional Holders")
+    if asset_data['institutional_holders'] is not None and not asset_data['institutional_holders'].empty:
+        inst_holders = asset_data['institutional_holders'].copy()
+        inst_holders['Value (B$)'] = inst_holders['Value'] / 1e9
+        inst_holders = inst_holders.rename(columns={'Value': 'Value_raw'})
+        inst_holders['Shares'] = inst_holders['Shares'].astype(int)
+        inst_holders['% Out'] = inst_holders['% Out'] * 100
+        display_df = inst_holders[['Holder', 'Shares', 'Date Reported', '% Out', 'Value (B$)']].copy()
+        display_df['% Out'] = display_df['% Out'].apply(lambda x: f"{x:.2f}%")
+        display_df['Shares'] = display_df['Shares'].apply(lambda x: f"{x:,.0f}")
+        display_df['Value (B$)'] = display_df['Value (B$)'].apply(lambda x: f"{x:.2f}")
+        st.table(display_df.reset_index(drop=True))
+    else:
+        st.write("Non disponible via yfinance pour ce symbole.")
 
     st.write("### Insider Holdings (Last 24 Months - SEC Forms 3 & 4)")
-    insiders = {
-        "Name": ["Aaron Anderson", "John Douglas Arnold", "Andrew Bosworth", "Christopher K Cox", "Susan J. Li"],
-        "Role": ["Officer", "Director", "Chief Technology Officer", "Officer", "Chief Financial Officer"],
-        "Last Transaction": ["Conversion", "Conversion", "Sale", "Sale", "Sale"],
-        "Date": ["Feb 14, 2025", "Feb 14, 2025", "Feb 14, 2025", "Feb 28, 2025", "Feb 14, 2025"],
-        "Shares Held": ["4,304", "924", "77,650", "--", "--"]
-    }
-    st.table(pd.DataFrame(insiders))
+    st.write("Non disponible via yfinance. Ces données nécessitent un accès aux dépôts SEC (Forms 3 & 4).")
 except Exception as e:
-    st.error(f"Error in shareholders/insiders: {str(e)}")
+    st.error(f"Erreur lors de la récupération des données actionnaires/initiés : {str(e)}")
 
 # Footer
 st.markdown("---")
