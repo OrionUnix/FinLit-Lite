@@ -67,7 +67,7 @@ def is_market_open(symbol: str, current_time: datetime.datetime) -> bool:
     
     if open_time < close_time:
         return open_time <= current_time_utc <= close_time
-    else:  # Cas où le marché traverse minuit (peu probable ici)
+    else:  # Cas où le marché traverse minuit
         return current_time_utc >= open_time or current_time_utc <= close_time
 
 def render_index_cards(market: str):
@@ -80,28 +80,115 @@ def render_index_cards(market: str):
         st.write("No data available for this market.")
         return
     
+    # Couleurs par défaut de Streamlit
+    positive_color = "#34C759"  # Vert
+    negative_color = "#FF4B4B"  # Rouge (primaryColor)
+
     cols = st.columns(3)
     for i, (symbol, details) in enumerate(indices.items()):
         with cols[i]:
             try:
                 if not is_market_open(symbol, current_time):
-                    st.write(f"**{details['name']}**: Market closed")
+                    open_hour, open_minute = details["open_utc"]
+                    close_hour, close_minute = details["close_utc"]
+                    st.markdown(
+                        f"""
+                        <a href='/asset?symbol={symbol}' style='text-decoration: none; color: inherit;'>
+                            <div class='asset-card' style='border-radius: 10px; border: 1px solid #ccc; background: transparent; cursor: pointer;'>
+                                <div style='background-color: #666; color: white; padding: 0.5rem; text-align: center; font-weight: 600; font-size: 1.1rem; border-radius: 10px 10px 0 0;'>
+                                    {symbol}
+                                </div>
+                                <div style='padding: 0.5rem; display: flex; flex-direction: column; gap: 0.2rem;'>
+                                    <div style='font-size: 0.9rem; font-weight: 500;'>{details['name']}</div>
+                                    <div style='color: #898fa3; font-size: 0.8rem;'>💤 Market closed</div>
+                                    <div style='color: #898fa3; font-size: 0.7rem;'>Open: {open_hour:02d}:{open_minute:02d} - Close: {close_hour:02d}:{close_minute:02d} UTC</div>
+                                </div>
+                            </div>
+                        </a>
+                        """,
+                        unsafe_allow_html=True
+                    )
                 elif symbol in data["Close"] and not data["Close"][symbol].isna().all():
                     current = data["Close"][symbol].iloc[-1]
                     prev_close = data["Close"][symbol].iloc[-2]
                     if pd.isna(current) or pd.isna(prev_close):
-                        st.write(f"**{details['name']}**: Insufficient data")
+                        st.markdown(
+                            f"""
+                            <a href='/asset?symbol={symbol}' style='text-decoration: none; color: inherit;'>
+                                <div class='asset-card' style='border-radius: 10px; border: 1px solid #ccc; background: transparent; cursor: pointer;'>
+                                    <div style='background-color: #666; color: white; padding: 0.5rem; text-align: center; font-weight: 600; font-size: 1.1rem; border-radius: 10px 10px 0 0;'>
+                                        {symbol}
+                                    </div>
+                                    <div style='padding: 0.5rem; display: flex; flex-direction: column; gap: 0.2rem;'>
+                                        <div style='font-size: 0.9rem; font-weight: 500;'>{details['name']}</div>
+                                        <div style='color: #898fa3; font-size: 0.8rem;'>Insufficient data</div>
+                                    </div>
+                                </div>
+                            </a>
+                            """,
+                            unsafe_allow_html=True
+                        )
                     else:
                         change_percent = ((current - prev_close) / prev_close) * 100
-                        trend = "▲" if change_percent >= 0 else "▼"
-                        st.write(f"**{details['name']}**")
-                        st.write(f"Current: ${current:,.2f}")
-                        st.write(f"Change: {trend} {abs(change_percent):.2f}%")
-                        st.write(f"Previous: ${prev_close:,.2f}")
+                        background_color = positive_color if change_percent >= 0 else negative_color
+                        st.markdown(
+                            f"""
+                            <a href='/asset?symbol={symbol}' style='text-decoration: none; color: inherit;'>
+                                <div class='asset-card' style='border-radius: 10px; border: 1px solid #ccc; background: transparent; cursor: pointer;'>
+                                    <div style='background-color: {background_color}; color: white; padding: 0.5rem; text-align: center; font-weight: 600; font-size: 1.1rem; border-radius: 10px 10px 0 0;'>
+                                        {symbol}
+                                    </div>
+                                    <div style='padding: 0.5rem; display: flex; flex-direction: column; gap: 0.2rem;'>
+                                        <div style='font-size: 0.9rem; font-weight: 500;'>{details['name']}</div>
+                                        <div style='display: flex; justify-content: space-between; align-items: center;'>
+                                            <div>
+                                                <div style='color: {positive_color if change_percent >= 0 else negative_color}; font-size: 0.9rem;'>
+                                                    {'▲' if change_percent >= 0 else '▼'} {abs(change_percent):.2f}%
+                                                </div>
+                                                <div style='color: #898fa3; font-size: 0.8rem;'>Prev: {prev_close:,.2f}$</div>
+                                            </div>
+                                            <div style='font-size: 1rem; font-weight: bold;'>{current:,.2f}$</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </a>
+                            """,
+                            unsafe_allow_html=True
+                        )
                 else:
-                    st.write(f"**{details['name']}**: Data unavailable")
+                    st.markdown(
+                        f"""
+                        <a href='/asset?symbol={symbol}' style='text-decoration: none; color: inherit;'>
+                            <div class='asset-card' style='border-radius: 10px; border: 1px solid #ccc; background: transparent; cursor: pointer;'>
+                                <div style='background-color: #666; color: white; padding: 0.5rem; text-align: center; font-weight: 600; font-size: 1.1rem; border-radius: 10px 10px 0 0;'>
+                                    {symbol}
+                                </div>
+                                <div style='padding: 0.5rem; display: flex; flex-direction: column; gap: 0.2rem;'>
+                                    <div style='font-size: 0.9rem; font-weight: 500;'>{details['name']}</div>
+                                    <div style='color: #898fa3; font-size: 0.8rem;'>Data unavailable</div>
+                                </div>
+                            </div>
+                        </a>
+                        """,
+                        unsafe_allow_html=True
+                    )
             except Exception as e:
-                st.write(f"**{details['name']}**: Error - {str(e)}")
+                st.markdown(
+                    f"""
+                    <a href='/asset?symbol={symbol}' style='text-decoration: none; color: inherit;'>
+                        <div class='asset-card' style='border-radius: 10px; border: 1px solid #ccc; background: transparent; cursor: pointer;'>
+                            <div style='background-color: #666; color: white; padding: 0.5rem; text-align: center; font-weight: 600; font-size: 1.1rem; border-radius: 10px 10px 0 0;'>
+                                {symbol}
+                            </div>
+                            <div style='padding: 0.5rem; display: flex; flex-direction: column; gap: 0.2rem;'>
+                                <div style='font-size: 0.9rem; font-weight: 500;'>{details['name']}</div>
+                                <div style='color: #898fa3; font-size: 0.8rem;'>Error: {str(e)}</div>
+                            </div>
+                        </div>
+                    </a>
+                    """,
+                    unsafe_allow_html=True
+                )
 
 def render_line_chart(market: str):
     """Affiche un graphique en ligne des évolutions en pourcentage dans un container."""
@@ -131,7 +218,7 @@ def render_line_chart(market: str):
                 x="Datetime",
                 y="Percent_Change",
                 color="Name",
-                title=f"{market} Indices - 1 Day Performance",
+                title=f"{market} Indices - 5 Day Performance",
                 labels={"Percent_Change": "Change (%)", "Datetime": "Time"}
             )
             fig.update_layout(yaxis_ticksuffix="%")
