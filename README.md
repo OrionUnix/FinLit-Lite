@@ -2,6 +2,11 @@
 
 FinLite is a free, open-source financial terminal built in Python, designed as a lightweight demo for portfolio analysis and market indices tracking. This version is optimized for deployment on Streamlit Community Cloud.
 
+## Explore the App
+
+If you'd like to see what it looks like, feel free to visit my page: [FinLit Lite App](https://finlit-lite.streamlit.app/)
+
+
 ## Features
 - **Portfolio Analysis**: Track a demo portfolio with real-time data (~5-min delay) from Yahoo Finance.
 - **Market Indices**: View major indices (US, Europe, Asia, etc.) with hourly updates and performance charts.
@@ -13,12 +18,13 @@ FinLite is a free, open-source financial terminal built in Python, designed as a
    git clone https://github.com/yourusername/FinLite.git
    cd FinLite
 2. Install dependencies:
-    pip install -r requirements.txt
+   ```bash 
+   pip install -r requirements.txt
 3. Run locally
-    streamlit run app.py
+  ```bash
+streamlit run app.py
 
-**Created by: OrionDeimos**
-
+```bash
 FinLite/
 │   app.py              # Main entry point
 │   requirements.txt    # Dependencies
@@ -31,3 +37,5 @@ FinLite/
     │   indices.py      # Market indices widget
     │   trending.py     # Trending stocks widget
     │   chart.py        # Price chart utilities"# FinLit-Lite" 
+
+**Created by: OrionDeimos**
