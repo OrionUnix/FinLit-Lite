@@ -4,3 +4,4 @@ plotly>=5.22.0
 pandas>=2.2.2
 pandas_ta>=0.3.14b0
 numpy>=1.26.4
+setuptools>=70.0.0
