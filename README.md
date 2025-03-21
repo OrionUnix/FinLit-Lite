@@ -38,5 +38,6 @@ FinLite/
     │   trending.py     # Trending stocks widget
     │   chart.py        # Price chart utilities"# FinLit-Lite" 
     │   technical_chart.py        # Price chart advance technique"# FinLit-Lite" 
+    │   fear.py        # fear and gread calcul indice"# FinLit-Lite" 
 
 **Created by: OrionDeimos**
