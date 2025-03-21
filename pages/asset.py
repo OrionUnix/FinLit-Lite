@@ -42,14 +42,8 @@ def create_price_chart(df, chart_type="Candlestick"):
             increasing_line_color=positive_color,
             decreasing_line_color=negative_color
         ))
-    else:  # Line
-        fig.add_trace(go.Scatter(
-            x=df.index,
-            y=df["Close"],
-            mode="lines",
-            line=dict(color=positive_color),
-            name="Price"
-        ))
+    else:
+        fig.add_trace(go.Scatter(x=df.index, y=df["Close"], mode="lines", line=dict(color=positive_color), name="Price"))
     fig.update_layout(
         title="Price History (1 Year)",
         yaxis_title="Price ($)",
@@ -61,11 +55,18 @@ def create_price_chart(df, chart_type="Candlestick"):
     return fig
 
 def calculate_technical(df):
-    """Calculate RSI and MACD technical indicators."""
+    """Calculate RSI, MACD, and other technical indicators."""
     try:
         df['RSI'] = ta.rsi(df['Close'], length=14)
         macd = ta.macd(df['Close'], fast=12, slow=26, signal=9)
-        return pd.concat([df, macd], axis=1)
+        df = pd.concat([df, macd], axis=1)
+        df['STOCH_K'] = ta.stoch(high=df['High'], low=df['Low'], close=df['Close'])['STOCHk_14_3_3']
+        df['CCI'] = ta.cci(df['High'], df['Low'], df['Close'], length=20)
+        df['WILLR'] = ta.willr(df['High'], df['Low'], df['Close'], length=14)
+        df['ATR'] = ta.atr(df['High'], df['Low'], df['Close'], length=14)
+        df['CHAIKIN'] = ta.adosc(df['High'], df['Low'], df['Close'], df['Volume'], fast=3, slow=10)
+        df['UO'] = ta.uo(df['High'], df['Low'], df['Close'], fast=7, medium=14, slow=28)
+        return df
     except Exception as e:
         st.error(f"Error calculating indicators: {str(e)}")
         return df
@@ -80,7 +81,7 @@ with st.sidebar:
     st.markdown(f"- 📊 [Asset](/asset?symbol={st.query_params.get('symbol', 'AAPL')})", unsafe_allow_html=True)
 
 # Récupération des données
-symbol = st.query_params.get("symbol", "META")  # Par défaut META
+symbol = st.query_params.get("symbol", "META")
 asset_data = get_asset_data(symbol)
 info = asset_data["info"]
 history = asset_data["history"]
@@ -113,7 +114,6 @@ with col1:
         ask = info.get("ask", "N/A")
         bid = info.get("bid", "N/A")
 
-        # Carte principale
         background_color = positive_color if change_pct >= 0 else negative_color
         st.markdown(
             f"""
@@ -142,7 +142,6 @@ with col1:
             unsafe_allow_html=True
         )
 
-        # Key Metrics mis à jour
         st.subheader("Key Metrics")
         st.markdown(
             f"""
@@ -199,11 +198,49 @@ try:
 except Exception as e:
     st.error(f"Error in technical analysis: {str(e)}")
 
+# Oscillateurs Techniques (Jauges)
+st.subheader("Technical Oscillators")
+try:
+    latest = df.iloc[-1]  # Dernière ligne pour les valeurs actuelles
+    cols = st.columns(4)
+    oscillators = [
+        ("RSI", latest['RSI'], 0, 100, "Relative Strength Index: Measures speed and change of price movements (0-100). Identifies overbought (>70) or oversold (<30) conditions."),
+        ("STOCH_K", latest['STOCH_K'], 0, 100, "Stochastic Oscillator: Compares closing price to its range over 14 days (0-100). Highlights overbought (>80) or oversold (<20) levels."),
+        ("CCI", latest['CCI'], -200, 200, "Commodity Channel Index: Measures price deviation from average (-200 to 200). Extreme values indicate potential reversals."),
+        ("WILLR", latest['WILLR'], -100, 0, "Williams %R: Momentum oscillator (0 to -100). Identifies overbought (>-20) or oversold (<-80) levels."),
+        ("MACD", latest['MACD_12_26_9'] - latest['MACDs_12_26_9'], -10, 10, "MACD Difference: Tracks momentum by comparing two moving averages. Positive/negative indicates bullish/bearish momentum."),
+        ("ATR", latest['ATR'], 0, max(20, latest['ATR'] * 1.5), "Average True Range: Measures volatility based on price range (higher = more volatile)."),
+        ("CHAIKIN", latest['CHAIKIN'], -1e9, 1e9, "Chaikin Oscillator: Combines price and volume to assess momentum."),
+        ("UO", latest['UO'], 0, 100, "Ultimate Oscillator: Uses multiple timeframes (7/14/28) to measure momentum (0-100).")
+    ]
+    for i, (name, value, min_val, max_val, desc) in enumerate(oscillators):
+        with cols[i % 4]:
+            fig_gauge = go.Figure(go.Indicator(
+                mode="gauge+number",
+                value=value if pd.notna(value) else min_val,
+                domain={'x': [0, 1], 'y': [0, 1]},
+                title={'text': name},
+                gauge={
+                    'shape': "bullet",  # Demi-cercle
+                    'axis': {'range': [min_val, max_val]},
+                    'bar': {'color': positive_color if value >= 0 else negative_color},
+                    'threshold': {
+                        'line': {'color': "red", 'width': 2},
+                        'thickness': 0.75,
+                        'value': max_val * 0.8 if max_val > 0 else min_val * 0.8
+                    }
+                }
+            ))
+            fig_gauge.update_layout(height=200, margin=dict(t=40, b=20))
+            st.plotly_chart(fig_gauge, use_container_width=True)
+            st.write(desc)
+except Exception as e:
+    st.error(f"Error in oscillators: {str(e)}")
+
 # Analyse Fondamentale
 try:
     st.subheader("Fundamental Analysis")
     tab1, tab2, tab3, tab4, tab5 = st.tabs(["Valuation", "Finances", "Dividends", "Competitors", "Performance Overview"])
-
     with tab1:
         valuation_data = {
             "P/E": asset_data['info'].get('trailingPE', 'N/A'),
@@ -215,7 +252,6 @@ try:
             "EPS (TTM)": asset_data['info'].get('trailingEps', 'N/A')
         }
         st.table(pd.DataFrame(valuation_data.items(), columns=["Ratio", "Value"]))
-
     with tab2:
         if asset_data['financials'] is not None and not asset_data['financials'].empty:
             rev = asset_data['financials'].loc['Total Revenue'].iloc[0] if 'Total Revenue' in asset_data['financials'].index else 0
@@ -229,7 +265,6 @@ try:
             st.metric("Gross Profit", f"{gross_profit/1e6:.2f}M$" if isinstance(gross_profit, (int, float)) else gross_profit)
         else:
             st.warning("Financial data not available")
-
     with tab3:
         st.metric("Dividend Yield", f"{asset_data['info'].get('dividendYield', 0)*100:.2f}%", f"Payout Ratio: {asset_data['info'].get('payoutRatio', 'N/A')}")
         if asset_data['dividends'] is not None and not asset_data['dividends'].empty:
@@ -242,7 +277,6 @@ try:
                 st.write("No dividends paid in the last 5 years.")
         else:
             st.write("No dividend history available.")
-
     with tab4:
         st.write("### Major Competitors")
         st.write("This is a Lite/Demo version. Competitor data is not available in this release.")
@@ -254,7 +288,6 @@ try:
             st.write("- Tesla (TSLA)\n- Amazon (AMZN)\n- Walmart (WMT)")
         else:
             st.write("Competitor data not readily available in this Lite version.")
-
     with tab5:
         st.write("### Performance Overview (as of Mar 20, 2025)")
         st.write("Total cumulative returns include dividends or other distributions. Benchmark: S&P 500 (^GSPC).")
@@ -264,7 +297,6 @@ try:
             "S&P 500 (^GSPC)": ["3.72%", "8.39%", "26.88%", "145.69%"]
         }
         st.table(pd.DataFrame(performance_data))
-
 except Exception as e:
     st.error(f"Error in fundamental analysis: {str(e)}")
 
@@ -297,11 +329,10 @@ try:
     else:
         st.warning("Cash flow data not available")
 
-    # Graphique des revenus et bénéfices
     st.write("### Revenue and Earnings (Q1-Q4 2024)")
     revenue_data = {
         "Quarter": ["Q1 2024", "Q2 2024", "Q3 2024", "Q4 2024"],
-        "Revenue (B$)": [36.45, 39.07, 40.59, 48.39],  # Valeurs réelles ou estimées
+        "Revenue (B$)": [36.45, 39.07, 40.59, 48.39],
         "Earnings (EPS)": [4.71, 5.16, 6.03, 8.02]
     }
     fig_bar = go.Figure()
@@ -310,7 +341,6 @@ try:
     fig_bar.update_layout(barmode='group', title="Revenue and Earnings by Quarter (2024)", height=400)
     st.plotly_chart(fig_bar, use_container_width=True)
 
-    # Estimations
     st.write("### Earnings Estimates")
     earnings_estimates = {
         "Metric": ["No. of Analysts", "Avg. Estimate", "Low Estimate", "High Estimate", "Prior Year EPS"],
@@ -330,7 +360,6 @@ try:
         "Next Year (2026)": [58, "214.48B", "204.21B", "240.61B", "188.51B"]
     }
     st.table(pd.DataFrame(revenue_estimates))
-
 except Exception as e:
     st.error(f"Error in DCF calculation: {str(e)}")
 
@@ -356,7 +385,6 @@ try:
         "Shares Held": ["4,304", "924", "77,650", "--", "--"]
     }
     st.table(pd.DataFrame(insiders))
-
 except Exception as e:
     st.error(f"Error in shareholders/insiders: {str(e)}")
 
