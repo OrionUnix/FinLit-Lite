@@ -30,7 +30,7 @@ MARKETS = {
     ],
     "Crypto": [
         {"symbol": "BTC-USD", "name": "Bitcoin", "sector": "Cryptocurrency"},
-        {"symbol": "AVAX-USD", "name": "Avalanche", "sector": "Cryptocurrency"},
+        {"symbol": "ETH-USD", "name": "Ethereum", "sector": "Cryptocurrency"},
         {"symbol": "BNB-USD", "name": "Binance Coin", "sector": "Cryptocurrency"},
     ],
     "Commodities": [
@@ -42,7 +42,7 @@ MARKETS = {
 
 @st.cache_data(ttl=1800)
 def fetch_market_data(market: str):
-    """Récupère les données pour tous les symboles d’un marché."""
+    """Récupère les données (Close et Volume) pour tous les symboles d’un marché."""
     assets = MARKETS.get(market, [])
     if not assets:
         return pd.DataFrame()
@@ -52,44 +52,51 @@ def fetch_market_data(market: str):
         if data.empty or data["Close"].isna().all().all():
             st.warning(f"No data returned for {market}.")
             return pd.DataFrame()
-        return data["Close"]
+        return {"Close": data["Close"], "Volume": data["Volume"]}
     except Exception as e:
         st.error(f"Erreur récupération données {market}: {str(e)}")
         return pd.DataFrame()
 
-def calculate_performance(close_data, symbol):
+def calculate_performance(market_data, symbol):
     """Calcule la performance journalière pour un symbole."""
+    close_data = market_data.get("Close", pd.DataFrame())
+    volume_data = market_data.get("Volume", pd.DataFrame())
     if symbol not in close_data.columns or len(close_data[symbol].dropna()) < 2:
-        return None, None, None
+        return None, None, None, None
     yesterday = close_data[symbol].iloc[-2]
     today = close_data[symbol].iloc[-1]
+    volume = volume_data[symbol].iloc[-1] if symbol in volume_data.columns else None
     if pd.isna(yesterday) or pd.isna(today):
-        return None, None, None
+        return None, None, None, None
     change_percent = ((today - yesterday) / yesterday) * 100
     amount_change = today - yesterday
-    return change_percent, amount_change, today
+    return change_percent, amount_change, today, volume
 
 def show_trending():
-    """Affiche les top gainers et losers par marché avec st.metric."""
+    """Affiche les top gainers et losers par marché avec des cartes cliquables."""
     st.subheader("Trending Stocks")
 
     # Onglets pour chaque marché
     tab_names = list(MARKETS.keys())
     tabs = st.tabs(tab_names)
 
+    # Couleurs par défaut de Streamlit
+    positive_color = "#34C759"  # Vert
+    negative_color = "#FF4B4B"  # Rouge (primaryColor)
+
     for i, tab in enumerate(tabs):
         with tab:
             market = tab_names[i]
-            close_data = fetch_market_data(market)
+            market_data = fetch_market_data(market)
             
-            if close_data.empty:
+            if not isinstance(market_data, dict) or not market_data:
                 st.write(f"No data available for {market}")
                 continue
 
             # Calcul des performances
             performances = []
             for asset in MARKETS[market]:
-                change, amount, price = calculate_performance(close_data, asset["symbol"])
+                change, amount, price, volume = calculate_performance(market_data, asset["symbol"])
                 if change is not None:
                     performances.append({
                         "symbol": asset["symbol"],
@@ -98,7 +105,7 @@ def show_trending():
                         "change": change,
                         "amount_change": amount,
                         "price": price,
-                        "volume": None  # Volume non inclus pour l'instant
+                        "volume": volume
                     })
 
             if not performances:
@@ -110,59 +117,75 @@ def show_trending():
             top_gainers = sorted_perf[:2]
             top_losers = sorted_perf[-2:][::-1]
 
-            # Couleurs par défaut de Streamlit
-            positive_color = "#34C759"  # Vert
-            negative_color = "#FF4B4B"  # Rouge (primaryColor)
-
             # Affichage dans un container
             with st.container():
                 st.write("**Top Gainers**")
                 cols = st.columns(2)
                 for idx, asset in enumerate(top_gainers):
                     with cols[idx]:
-                        # Header avec symbole cliquable
-                        st.markdown(
-                            f"<a href='/asset?symbol={asset['symbol']}' style='text-decoration: none; color: inherit;'><div style='text-align: center; font-weight: bold; font-size: 1.1rem; padding: 5px;'>{asset['symbol']}</div></a>",
-                            unsafe_allow_html=True
-                        )
-                        # Metric avec fond coloré
                         background_color = positive_color if asset['change'] >= 0 else negative_color
                         st.markdown(
-                            f"<div style='background-color: {background_color}; border-radius: 5px; padding: 10px;'>",
+                            f"""
+                            <a href='/asset?symbol={asset['symbol']}' style='text-decoration: none; color: inherit;'>
+                                <div class='asset-card' style='border-radius: 10px; background: #FFFFFF; cursor: pointer;'>
+                                    <div style='background-color: {background_color}; color: white; padding: 0.5rem; text-align: center; font-weight: 600; font-size: 1.1rem; border-radius: 10px 10px 0 0;'>
+                                        {asset['symbol']}
+                                    </div>
+                                    <div style='padding: 0.5rem; display: flex; flex-direction: column; gap: 0.2rem;'>
+                                        <div style='font-size: 0.9rem; font-weight: 500;'>{asset['name']}</div>
+                                        <div style='display: flex; justify-content: space-between; align-items: center;'>
+                                            <div>
+                                                <div style='color: {positive_color if asset['change'] >= 0 else negative_color}; font-size: 0.9rem;'>
+                                                    {'▲' if asset['change'] >= 0 else '▼'} {abs(asset['change']):.2f}%
+                                                </div>
+                                                <div style='color: #898fa3; font-size: 0.8rem;'>{asset['amount_change']:+.2f}$</div>
+                                                <div style='color: #898fa3; font-size: 0.8rem;'>({asset['volume']:,} vol)</div>
+                                            </div>
+                                            <div style='font-size: 1rem; font-weight: bold;'>{asset['price']:,.2f}$</div>
+                                        </div>
+                                        <div style='background-color: #e6e6e6; color: #666; padding: 0.2rem 0.5rem; border-radius: 5px; font-size: 0.8rem; text-align: center; margin-top: 0.2rem;'>
+                                            {asset['sector']}
+                                        </div>
+                                    </div>
+                                </div>
+                            </a>
+                            """,
                             unsafe_allow_html=True
                         )
-                        st.metric(
-                            label=f"{asset['name']} ({asset['sector']})",
-                            value=f"{asset['price']:,.2f}$",
-                            delta=f"{'▲' if asset['change'] >= 0 else '▼'} {abs(asset['change']):.2f}% ({asset['amount_change']:+.2f}$)",
-                            delta_color="normal" if asset['change'] >= 0 else "inverse",
-                            border=True
-                        )
-                        st.markdown("</div>", unsafe_allow_html=True)
 
                 st.write("**Top Losers**")
                 cols = st.columns(2)
                 for idx, asset in enumerate(top_losers):
                     with cols[idx]:
-                        # Header avec symbole cliquable
-                        st.markdown(
-                            f"<a href='/asset?symbol={asset['symbol']}' style='text-decoration: none; color: inherit;'><div style='text-align: center; font-weight: bold; font-size: 1.1rem; padding: 5px;'>{asset['symbol']}</div></a>",
-                            unsafe_allow_html=True
-                        )
-                        # Metric avec fond coloré
                         background_color = positive_color if asset['change'] >= 0 else negative_color
                         st.markdown(
-                            f"<div style='background-color: {background_color}; border-radius: 5px; padding: 10px;'>",
+                            f"""
+                            <a href='/asset?symbol={asset['symbol']}' style='text-decoration: none; color: inherit;'>
+                                <div class='asset-card' style='border-radius: 10px; background: #FFFFFF; cursor: pointer;'>
+                                    <div style='background-color: {background_color}; color: white; padding: 0.5rem; text-align: center; font-weight: 600; font-size: 1.1rem; border-radius: 10px 10px 0 0;'>
+                                        {asset['symbol']}
+                                    </div>
+                                    <div style='padding: 0.5rem; display: flex; flex-direction: column; gap: 0.2rem;'>
+                                        <div style='font-size: 0.9rem; font-weight: 500;'>{asset['name']}</div>
+                                        <div style='display: flex; justify-content: space-between; align-items: center;'>
+                                            <div>
+                                                <div style='color: {positive_color if asset['change'] >= 0 else negative_color}; font-size: 0.9rem;'>
+                                                    {'▲' if asset['change'] >= 0 else '▼'} {abs(asset['change']):.2f}%
+                                                </div>
+                                                <div style='color: #898fa3; font-size: 0.8rem;'>{asset['amount_change']:+.2f}$</div>
+                                                <div style='color: #898fa3; font-size: 0.8rem;'>({asset['volume']:,} vol)</div>
+                                            </div>
+                                            <div style='font-size: 1rem; font-weight: bold;'>{asset['price']:,.2f}$</div>
+                                        </div>
+                                        <div style='background-color: #e6e6e6; color: #666; padding: 0.2rem 0.5rem; border-radius: 5px; font-size: 0.8rem; text-align: center; margin-top: 0.2rem;'>
+                                            {asset['sector']}
+                                        </div>
+                                    </div>
+                                </div>
+                            </a>
+                            """,
                             unsafe_allow_html=True
                         )
-                        st.metric(
-                            label=f"{asset['name']} ({asset['sector']})",
-                            value=f"{asset['price']:,.2f}$",
-                            delta=f"{'▲' if asset['change'] >= 0 else '▼'} {abs(asset['change']):.2f}% ({asset['amount_change']:+.2f}$)",
-                            delta_color="normal" if asset['change'] >= 0 else "inverse",
-                            border=True
-                        )
-                        st.markdown("</div>", unsafe_allow_html=True)
 
 if __name__ == "__main__":
     st.set_page_config(layout="wide")
