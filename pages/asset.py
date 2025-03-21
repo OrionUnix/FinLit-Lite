@@ -256,7 +256,33 @@ except Exception as e:
 # Analyse Fondamentale
 st.subheader("Fundamental Analysis")
 try:
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["Valuation", "Finances", "Dividends", "Competitors", "Performance Overview"])
+    # DCF Analysis (sorti des onglets)
+    st.write("### Discounted Cash Flow (DCF) Analysis")
+    st.write("Estimate the intrinsic value of the asset by adjusting the sliders below.")
+    if asset_data['cashflow'] is not None and 'Free Cash Flow' in asset_data['cashflow'].index:
+        fcf = asset_data['cashflow'].loc['Free Cash Flow'].iloc[0]
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            growth = st.slider("FCF Growth Rate (%)", 0.0, 20.0, 8.0, 0.5, key="dcf_growth")
+        with col2:
+            discount = st.slider("Discount Rate (%)", 5.0, 15.0, 10.0, 0.5, key="dcf_discount")
+        with col3:
+            terminal = st.slider("Terminal Growth Rate (%)", 0.0, 5.0, 2.5, 0.1, key="dcf_terminal")
+        if discount > terminal:
+            years = 5
+            cashflows = [fcf * (1 + growth/100)**i for i in range(1, years+1)]
+            terminal_value = cashflows[-1] * (1 + terminal/100) / ((discount - terminal)/100)
+            dcf_value = sum(cf / (1 + discount/100)**i for i, cf in enumerate(cashflows, 1)) + terminal_value / (1 + discount/100)**years
+            current_mc = info.get('marketCap', 0)
+            delta = dcf_value - current_mc
+            st.metric("Estimated DCF Value", f"{dcf_value/1e9:.2f}B$", delta=f"{delta/1e9:.2f}B$ vs Market Cap", delta_color="normal" if delta > 0 else "inverse")
+        else:
+            st.warning("Discount rate must be greater than terminal growth rate")
+    else:
+        st.warning("Cash flow data not available")
+
+    # Onglets restants
+    tab1, tab2, tab3, tab4 = st.tabs(["Valuation", "Finances", "Dividends", "Competitors"])
     with tab1:
         valuation_data = {
             "Ratio": ["P/E", "P/S", "EV/EBITDA", "P/B", "Dividend Yield", "Beta (5Y Monthly)", "EPS (TTM)"],
@@ -306,38 +332,6 @@ try:
             st.write("- Tesla (TSLA)\n- Amazon (AMZN)\n- Walmart (WMT)")
         else:
             st.write("Competitor data not readily available in this Lite version.")
-    with tab5:
-        st.write("### Performance Overview (as of Mar 20, 2025)")
-        st.write("Total cumulative returns include dividends or other distributions. Benchmark: S&P 500 (^GSPC).")
-        performance_data = {
-            "Period": ["YTD", "1 Year", "3 Years", "5 Years"],
-            "Symbol": ["N/A", "N/A", "N/A", "N/A"],
-            "S&P 500 (^GSPC)": ["3.72%", "8.39%", "26.88%", "145.69%"]
-        }
-        st.dataframe(pd.DataFrame(performance_data), hide_index=True)
-
-        st.write("### Discounted Cash Flow (DCF) Analysis")
-        if asset_data['cashflow'] is not None and 'Free Cash Flow' in asset_data['cashflow'].index:
-            fcf = asset_data['cashflow'].loc['Free Cash Flow'].iloc[0]
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                growth = st.slider("FCF Growth Rate (%)", 0.0, 20.0, 8.0, 0.5)
-            with col2:
-                discount = st.slider("Discount Rate (%)", 5.0, 15.0, 10.0, 0.5)
-            with col3:
-                terminal = st.slider("Terminal Growth Rate (%)", 0.0, 5.0, 2.5, 0.1)
-            if discount > terminal:
-                years = 5
-                cashflows = [fcf * (1 + growth/100)**i for i in range(1, years+1)]
-                terminal_value = cashflows[-1] * (1 + terminal/100) / ((discount - terminal)/100)
-                dcf_value = sum(cf / (1 + discount/100)**i for i, cf in enumerate(cashflows, 1)) + terminal_value / (1 + discount/100)**years
-                current_mc = info.get('marketCap', 0)
-                delta = dcf_value - current_mc
-                st.metric("Estimated DCF Value", f"{dcf_value/1e9:.2f}B$", delta=f"{delta/1e9:.2f}B$ vs Market Cap", delta_color="normal" if delta > 0 else "inverse")
-            else:
-                st.warning("Discount rate must be greater than terminal growth rate")
-        else:
-            st.warning("Cash flow data not available")
 except Exception as e:
     st.error(f"Error in fundamental analysis: {str(e)}")
 
