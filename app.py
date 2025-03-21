@@ -6,10 +6,6 @@ from widgets.trending import show_trending
 st.title("FinLite - Lightweight Financial Terminal")
 
 
-# Navigation
-menu = ["Home", "Portfolio", "Indices", "Trending"]
-choice = st.sidebar.selectbox("Menu", menu)
-
 # Affichage des widgets directement
 show_indices()
 show_trending()
