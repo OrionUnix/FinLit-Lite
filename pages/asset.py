@@ -272,7 +272,7 @@ try:
                 asset_data['info'].get('trailingEps', 'N/A')
             ]
         }
-        st.table(pd.DataFrame(valuation_data).reset_index(drop=True))
+        st.dataframe(pd.DataFrame(valuation_data), hide_index=True)
     with tab2:
         if asset_data['financials'] is not None and not asset_data['financials'].empty:
             rev = asset_data['financials'].loc['Total Revenue'].iloc[0] if 'Total Revenue' in asset_data['financials'].index else 0
@@ -293,7 +293,7 @@ try:
             five_years_ago = datetime.now().year - 5
             div_history = asset_data['dividends'][asset_data['dividends'].index.year >= five_years_ago]
             if not div_history.empty:
-                st.table(div_history.rename("Dividend ($)").to_frame().reset_index(drop=True))
+                st.dataframe(div_history.rename("Dividend ($)").to_frame(), hide_index=True)
             else:
                 st.write("No dividends paid in the last 5 years.")
         else:
@@ -317,7 +317,7 @@ try:
             "Symbol": ["N/A", "N/A", "N/A", "N/A"],
             "S&P 500 (^GSPC)": ["3.72%", "8.39%", "26.88%", "145.69%"]
         }
-        st.table(pd.DataFrame(performance_data).reset_index(drop=True))
+        st.dataframe(pd.DataFrame(performance_data), hide_index=True)
 
         st.write("### Discounted Cash Flow (DCF) Analysis")
         st.write("Estimate the intrinsic value of the asset by adjusting the sliders below.")
@@ -378,7 +378,7 @@ try:
         "Current Year": [45, 4.85, 4.50, 5.20, 3.80],
         "Next Year": [42, 5.90, 5.50, 6.30, 4.85]
     }
-    st.table(pd.DataFrame(earnings_estimates).reset_index(drop=True))
+    st.dataframe(pd.DataFrame(earnings_estimates), hide_index=True)
 
     st.write("### Revenue Estimates")
     st.write("Revenue estimates not fully available via yfinance free API. Static example shown below:")
@@ -389,7 +389,7 @@ try:
         "Current Year": [45, 115.20, 112.00, 118.50, 61.37],
         "Next Year": [42, 140.30, 135.00, 145.60, 115.20]
     }
-    st.table(pd.DataFrame(revenue_estimates).reset_index(drop=True))
+    st.dataframe(pd.DataFrame(revenue_estimates), hide_index=True)
 except Exception as e:
     st.error(f"Error in estimates: {str(e)}")
 
@@ -408,7 +408,7 @@ try:
             df_shareholders = pd.DataFrame(shareholders)
             df_shareholders['% Out'] = df_shareholders['% Out'].apply(lambda x: f"{x:.2f}%")
             df_shareholders['Shares'] = df_shareholders['Shares'].apply(lambda x: f"{x:,.0f}")
-            st.table(df_shareholders.reset_index(drop=True))
+            st.dataframe(df_shareholders, hide_index=True)
         else:
             st.write("Données insuffisantes via yfinance pour ce symbole.")
     else:
@@ -425,7 +425,7 @@ try:
         display_df['% Out'] = display_df['% Out'].apply(lambda x: f"{x:.2f}%")
         display_df['Shares'] = display_df['Shares'].apply(lambda x: f"{x:,.0f}")
         display_df['Value (B$)'] = display_df['Value (B$)'].apply(lambda x: f"{x:.2f}")
-        st.table(display_df.reset_index(drop=True))
+        st.dataframe(display_df, hide_index=True)
     else:
         st.write("Non disponible via yfinance pour ce symbole.")
 
